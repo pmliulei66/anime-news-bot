@@ -42,6 +42,10 @@ def generate_markdown(news_list: list[dict], date_str: str) -> str:
         logger.warning("没有新闻可生成汇总")
         return ""
 
+    # 按评分排序（已由 SQL 保证），取前 15 条用于公众号
+    news_list = news_list[:15]
+    logger.info(f"取前 {len(news_list)} 条新闻生成汇总")
+
     # 按评分分组
     top_news = [n for n in news_list if n["score"] >= 9]
     hot_news = [n for n in news_list if 7 <= n["score"] < 9]

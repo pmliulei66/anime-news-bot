@@ -45,6 +45,8 @@ NewsItem:
   ai_summary  — 中文简述（≤30字符）
   ai_intro    — 中文介绍（50-100字，≤120字符）
   keep        — 是否保留（bool）
+  pending     — Score == 7 时为待定状态（bool）
+  reason      — AI 评分理由（简短中文）
 ```
 
 ---
@@ -84,9 +86,12 @@ media_thumbnail → media_content → enclosures → summary 中的 <img> 标签
 
 ### 4.1 去重逻辑
 
-- 以 `entry_id`（默认 = link）为唯一标识
-- 使用 `INSERT OR IGNORE`，已存在的记录不会覆盖
-- 每次运行只处理**新增**新闻
+1. **Entry ID 去重**：以 `entry_id`（默认 = link）为唯一标识，使用 `INSERT OR IGNORE`
+2. **标题模糊去重**：使用 `rapidfuzz` 计算标题相似度，24 小时内相似度 > 90% 的标题视为重复
+
+```
+IF 标题相似度 > 90% AND 时间跨度 < 24h THEN 跳过
+```
 
 ### 4.2 数据库字段
 
@@ -98,9 +103,11 @@ processed_news (
     source     TEXT,          -- 来源
     score      INTEGER,       -- AI 评分
     kept       INTEGER,       -- 是否保留（0/1）
+    pending    INTEGER,       -- 是否待定（0/1，Score == 7 时为 1）
     ai_title   TEXT,          -- 中文标题
     ai_intro   TEXT,          -- 中文介绍
     image_url  TEXT,          -- 配图 URL
+    reason     TEXT,          -- AI 评分理由
     created_at TIMESTAMP      -- 处理时间
 )
 ```
@@ -111,40 +118,69 @@ processed_news (
 - `kept=1` 表示保留，`kept=0` 表示剔除
 - AI 字段（ai_title、ai_intro、image_url）必须同时写入
 
+### 4.4 数据保留规则
+
+- 数据库**最多保留 30 条**记录，按 `score DESC, created_at DESC` 排序
+- 每次写入后自动清理超出部分（删除评分最低的记录）
+- 确保数据库不会无限增长
+
 ---
 
 ## 五、AI 筛选规则（filter.py）
 
-### 5.1 评分标准
+### 5.1 评分标准（内容价值 + 独特性）
 
 | 分数 | 类别 | 示例 |
 |------|------|------|
-| 9-10 | 重大业界新闻 | 新企划公布、知名导演新作、重要人事变动 |
-| 7-8 | 动画制作动态 | 定档、新预告、重要声优 cast |
-| 5-6 | 一般性新闻 | 普通采访、小规模活动、常规 BD 发售 |
-| 3-4 | 周边商品 | 手办售卖、手游活动、普通联名 |
-| 1-2 | 琐碎信息 | 与动漫核心内容无关 |
+| 9-10 | 重磅 | 全球首发、超人气IP续作、名监督新作 |
+| 7-8 | 必追 | 新番定档（含视觉图/PV）、核心Staff/声优变动 |
+| 5-6 | 观察 | 动画完结感言、声优重大喜报、高水平幕后采访 |
+| 1-4 | 垃圾 | 手游联动、抽奖活动、普通手办预售 |
 
-### 5.2 保留阈值
+### 5.2 加分关键词（Bonus）
 
-- **默认阈值**：`SCORE_THRESHOLD = 7`（可在 .env 配置）
-- `score >= 7` 且 `keep = true` 才保留
-- AI 调用失败的条目默认**不保留**（score=0, keep=false）
+满足以下关键词时**升档处理**：
+- PV2（通常画质更稳）
+- 制作决定（首发新闻）
+- Staff公布、剧场版
+- 知名IP的"定档"、"预告"、"特报" → 直接给 8 分以上
 
-### 5.3 AI 输出格式
+### 5.3 必杀关键词（Reject）
+
+标题/摘要中包含以下关键词，直接 `keep=false`：
+- 手游、游戏内活动、抽奖、周边预订
+- 联动周边、期间限定店、手游生放送、游戏复刻
+
+### 5.4 强制过滤（安全规则）
+
+以下内容直接 `keep=false`：
+- 涉及裸露、色情的内容
+- 极端政治敏感内容
+- 明显辱华倾向的番剧相关新闻
+
+### 5.5 双阈值过滤
+
+| Score | 状态 | 处理方式 |
+|-------|------|----------|
+| ≥ 8 | 自动流 | 直接保留并推送飞书 |
+| = 7 | 待定流 | 推送到飞书待确认区 |
+| < 7 | 丢弃流 | 默默记录，不打扰 |
+
+### 5.6 AI 输出格式
 
 必须返回严格 JSON：
 ```json
 {
-  "keep": true/false,
   "score": 1-10,
+  "keep": true/false,
   "title_cn": "中文标题（翻译原标题，保留作品名原名）",
   "summary_cn": "中文简述（30字以内）",
-  "intro_cn": "中文介绍（50-100字，适合二次元爱好者阅读）"
+  "intro_cn": "中文介绍（50-100字，适合二次元爱好者阅读）",
+  "reason": "简短的中文字符串，说明为何给这个分"
 }
 ```
 
-### 5.4 字段截断规则
+### 5.7 字段截断规则
 
 | 字段 | 最大长度 | 截断方式 |
 |------|----------|----------|
@@ -254,6 +290,7 @@ processed_news (
 
 - 组内按 `score DESC`（高分在前）
 - 同分按 `created_at ASC`（先抓取的在前）
+- **公众号最多取前 15 条**（按评分排序后截断）
 
 ### 7.4 图片规则
 
@@ -348,10 +385,14 @@ hr:       1px #eee 实线
 
 ```
 1. fetch_all_sources()        → 抓取所有源
-2. storage.filter_new()       → SQLite 去重，过滤新新闻
-3. ai_filter.filter_news()    → AI 评分 + 翻译 + 介绍
-4. send_to_feishu()           → 推送到飞书（仅保留的新闻）
-5. storage.mark_processed()   → 所有新新闻写入数据库（含 AI 字段）
+2. storage.filter_new()       → SQLite 去重（entry_id + 标题模糊）
+3. ai_filter.filter_news()    → AI 评分 + 双阈值过滤
+   ├─ Score >= 8: 自动流 → kept_items
+   ├─ Score == 7: 待定流 → pending_items
+   └─ Score < 7: 丢弃流
+4. send_to_feishu(kept_items, title="自动通过")
+   send_to_feishu(pending_items, title="待确认") → 推送到飞书
+5. storage.mark_processed()   → 所有新新闻写入数据库
 ```
 
 ### 10.2 每日汇总流程（generate_digest.py）

@@ -21,7 +21,7 @@ FEISHU_HEADERS = {
 }
 
 
-def _build_feishu_card(items: list[NewsItem]) -> dict:
+def _build_feishu_card(items: list[NewsItem], title: Optional[str] = None) -> dict:
     """
     构建飞书消息卡片（Interactive Card）
 
@@ -46,6 +46,10 @@ def _build_feishu_card(items: list[NewsItem]) -> dict:
         # 添加 AI 介绍（50-100字）
         if item.ai_intro:
             line += f"📝 {item.ai_intro}\n\n"
+        
+        # 添加评分理由（如果有）
+        if item.reason:
+            line += f"💡 {item.reason}\n\n"
 
         # 添加原文链接
         line += f"🔗 [查看原文]({item.link})"
@@ -54,6 +58,9 @@ def _build_feishu_card(items: list[NewsItem]) -> dict:
 
     content_md = "\n\n---\n\n".join(news_lines)
 
+    # 使用自定义标题或默认标题
+    header_title = title or f"🎬 动漫新闻速递 ({datetime.now().strftime('%m-%d %H:%M')})"
+
     # 飞书消息卡片 JSON
     card = {
         "msg_type": "interactive",
@@ -61,7 +68,7 @@ def _build_feishu_card(items: list[NewsItem]) -> dict:
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": f"🎬 动漫新闻速递 ({datetime.now().strftime('%m-%d %H:%M')})",
+                    "content": header_title,
                 },
                 "template": "blue",
             },
@@ -132,7 +139,8 @@ def _build_feishu_text(items: list[NewsItem]) -> dict:
 
 def send_to_feishu(items: list[NewsItem],
                    webhook_url: Optional[str] = None,
-                   use_card: bool = True) -> bool:
+                   use_card: bool = True,
+                   title: Optional[str] = None) -> bool:
     """
     推送新闻到飞书
 
@@ -140,6 +148,7 @@ def send_to_feishu(items: list[NewsItem],
         items: 待推送的 NewsItem 列表
         webhook_url: 飞书 Webhook URL（默认从配置读取）
         use_card: 是否使用卡片格式（false 则使用富文本）
+        title: 自定义标题（默认使用 "动漫新闻速递"）
 
     Returns:
         是否推送成功
@@ -155,7 +164,7 @@ def send_to_feishu(items: list[NewsItem],
 
     # 构建消息体
     if use_card:
-        payload = _build_feishu_card(items)
+        payload = _build_feishu_card(items, title=title)
     else:
         payload = _build_feishu_text(items)
 

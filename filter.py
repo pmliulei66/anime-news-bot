@@ -13,22 +13,43 @@ from fetcher import NewsItem
 
 logger = logging.getLogger(__name__)
 
-# 系统提示词
-SYSTEM_PROMPT = """你是一位资深的动漫行业分析师。你的任务是分析动漫新闻的价值。
+# 系统提示词 - 优化版：引入内容价值+独特性、加分/必杀关键词
+SYSTEM_PROMPT = """# 任务：动漫资讯降噪专家
 
-评分标准：
-- 9-10分：重大业界新闻（新企划公布、知名导演/制作公司新作、重要人事变动）
-- 7-8分：动画制作动态、定档信息、新预告片发布、重要声优 cast 公布
-- 5-6分：一般性新闻（普通采访、小规模活动、常规 BD 发售）
-- 3-4分：周边商品售卖、手游活动、普通联名
-- 1-2分：与动漫核心内容无关的琐碎信息
+你现在是一名资深动漫博主，请对以下 RSS 资讯进行筛选。你的目标是选出能引起动漫爱好者讨论的"硬核资讯"。
 
-保留规则：
-- 评分 >= 7 的新闻保留并推送
-- 评分 < 7 的新闻剔除
+## 筛选标准：
+1. **内容权重评分 (0-10)：**
+   - [9-10分]：全球首发、超人气IP新作、名监督（如汤浅、新海诚）新动作。
+   - [7-8分]：新番正式定档（包含视觉图/PV）、核心Staff/声优表变动。
+   - [5-6分]：动画完结感言、声优重大喜报、高水平的动画幕后采访。
+   - [5分以下]：手游联动、抽奖活动、普通手办预售、不涉及动画本体的商业活动。
 
-你必须严格按照以下 JSON 格式回复，不要包含任何其他文字：
-{"keep": true/false, "score": 1-10, "title_cn": "中文标题（翻译原标题，保留作品名原名）", "summary_cn": "中文简述（30字以内）", "intro_cn": "中文介绍（50-100字，介绍新闻主要内容，适合二次元爱好者阅读）"}"""
+2. **加分关键词 (Bonus)：**
+   - PV2（通常画质更稳）
+   - 制作决定（首发新闻）
+   - Staff公布、剧场版
+   - 如果是知名IP的"定档"、"预告"、"特报"，直接给 8 分以上
+
+3. **必杀关键词 (Reject)：**
+   - 标题中包含"手游"、"游戏内活动"、"抽奖"、"周边预订"
+   - 联动周边、期间限定店、手游生放送、游戏复刻
+   - 以上内容直接标记 keep=false
+
+4. **强制规则：**
+   - 涉及裸露、色情、极端政治敏感的内容，直接标记 keep=false
+   - 有明显辱华倾向的番剧相关新闻，直接标记 keep=false
+
+## 输出格式：
+请仅返回 JSON：
+{
+  "score": [数字],
+  "keep": [true/false],
+  "title_cn": "中文标题（翻译原标题，保留作品名原名）",
+  "summary_cn": "中文简述（30字以内）",
+  "intro_cn": "中文介绍（50-100字，适合二次元爱好者阅读）",
+  "reason": "简短的中文字符串，说明为何给这个分"
+}"""
 
 USER_PROMPT_TEMPLATE = """请分析以下动漫新闻：
 
@@ -147,6 +168,7 @@ class AIFilter:
             result.setdefault("title_cn", "")
             result.setdefault("summary_cn", "")
             result.setdefault("intro_cn", "")
+            result.setdefault("reason", "")
 
             # 类型转换和范围校验
             result["keep"] = bool(result["keep"])
@@ -196,6 +218,7 @@ class AIFilter:
             item.ai_title = result["title_cn"]  # AI 翻译的中文标题
             item.ai_summary = result["summary_cn"]
             item.ai_intro = result["intro_cn"]
+            item.reason = result.get("reason", "")
             logger.info(
                 f"[{item.source}] 评分: {item.score}, 保留: {item.keep} | "
                 f"{item.ai_title[:40] if item.ai_title else item.title[:40]}"
@@ -207,13 +230,18 @@ class AIFilter:
             item.ai_title = ""
             item.ai_summary = "AI 分析失败"
             item.ai_intro = ""
+            item.reason = ""
             logger.warning(f"AI 分析失败，跳过: {item.title[:40]}")
 
         return item
 
     def filter_news(self, items: list[NewsItem]) -> list[NewsItem]:
         """
-        批量筛选新闻
+        批量筛选新闻 - 双阈值过滤
+        
+        - Score >= 8: 自动流，直接保留
+        - Score == 7: 待定流，需要人工确认
+        - Score < 7: 丢弃流
 
         Args:
             items: 待筛选的 NewsItem 列表
@@ -222,14 +250,22 @@ class AIFilter:
             评分超过阈值且被 AI 标记为保留的 NewsItem 列表
         """
         kept_items = []
+        pending_items = []
 
         for item in items:
             analyzed = self.analyze(item)
-            if analyzed.keep and analyzed.score >= Config.SCORE_THRESHOLD:
+            if analyzed.keep and analyzed.score >= 8:
+                # 自动流：Score >= 8
                 kept_items.append(analyzed)
+            elif analyzed.keep and analyzed.score == 7:
+                # 待定流：Score == 7，标记为待定
+                analyzed.pending = True
+                pending_items.append(analyzed)
 
         logger.info(
-            f"AI 筛选完成: {len(items)} 条中 {len(kept_items)} 条被保留 "
-            f"(阈值 >= {Config.SCORE_THRESHOLD})"
+            f"AI 筛选完成: {len(items)} 条中 {len(kept_items)} 条自动保留, "
+            f"{len(pending_items)} 条待定 (Score 7)"
         )
-        return kept_items
+        
+        # 返回自动保留项，待定项由调用方单独处理
+        return kept_items, pending_items

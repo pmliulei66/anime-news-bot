@@ -44,6 +44,8 @@ class NewsItem:
     ai_summary: str = ""
     ai_intro: str = ""  # AI 生成的 50-100 字介绍
     keep: bool = False
+    pending: bool = False  # Score == 7 时为待定状态
+    reason: str = ""  # AI 评分理由
 
     def __post_init__(self):
         # 如果没有 entry_id，用 link 作为唯一标识

@@ -99,32 +99,29 @@ def run_once(dry_run: bool = False) -> dict:
             logger.info("没有新新闻，本次任务结束")
             return stats
 
-        # 4. AI 筛选评分
-        kept_items = ai_filter.filter_news(new_items)
+        # 4. AI 筛选评分 - 双阈值过滤
+        # - Score >= 8: 自动流，直接保留并推送
+        # - Score == 7: 待定流，发送到飞书询问
+        # - Score < 7: 丢弃流
+        kept_items, pending_items = ai_filter.filter_news(new_items)
         stats["kept"] = len(kept_items)
-
-        if not kept_items:
-            logger.info("没有达到评分阈值的新闻，不推送")
-            # 仍然标记所有新新闻为已处理
-            for item in new_items:
-                storage.mark_processed(
-                    entry_id=item.entry_id,
-                    title=item.title,
-                    link=item.link,
-                    source=item.source,
-                    score=item.score,
-                    kept=False,
-                    ai_title=item.ai_title,
-                    ai_intro=item.ai_intro,
-                    image_url=item.image_url,
-                )
-            return stats
+        stats["pending"] = len(pending_items)
 
         # 5. 推送到飞书
-        success = send_to_feishu(kept_items)
-        stats["pushed"] = len(kept_items) if success else 0
+        # 5.1 自动流（Score >= 8）
+        if kept_items:
+            success = send_to_feishu(kept_items, title="🎬 动漫新闻速递（自动通过）")
+            stats["pushed"] = len(kept_items) if success else 0
+        
+        # 5.2 待定流（Score == 7）
+        if pending_items:
+            send_to_feishu(pending_items, title="⏳ 动漫新闻待确认（Score 7）")
+            logger.info(f"{len(pending_items)} 条新闻待人工确认")
 
-        # 6. 标记所有新新闻为已处理（包括被过滤的）
+        if not kept_items and not pending_items:
+            logger.info("没有达到评分阈值的新闻，不推送")
+
+        # 6. 标记所有新新闻为已处理（包括被过滤的、待定的）
         for item in new_items:
             storage.mark_processed(
                 entry_id=item.entry_id,
@@ -133,9 +130,11 @@ def run_once(dry_run: bool = False) -> dict:
                 source=item.source,
                 score=item.score,
                 kept=item in kept_items,
+                pending=item in pending_items,
                 ai_title=item.ai_title,
                 ai_intro=item.ai_intro,
                 image_url=item.image_url,
+                reason=item.reason,
             )
 
         # 7. 打印统计

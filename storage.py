@@ -5,6 +5,7 @@ SQLite 持久化去重模块
 
 import logging
 import sqlite3
+from datetime import datetime, timedelta
 from typing import Optional
 
 from config import Config
@@ -21,9 +22,11 @@ CREATE TABLE IF NOT EXISTS processed_news (
     source     TEXT,
     score      INTEGER DEFAULT 0,
     kept       INTEGER DEFAULT 0,
+    pending    INTEGER DEFAULT 0,  -- Score == 7 时为待定状态
     ai_title   TEXT    DEFAULT '',
     ai_intro   TEXT    DEFAULT '',
     image_url  TEXT    DEFAULT '',
+    reason     TEXT    DEFAULT '',  -- AI 评分理由
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -65,22 +68,88 @@ class NewsStorage:
 
     def mark_processed(self, entry_id: str, title: str = "", link: str = "",
                        source: str = "", score: int = 0, kept: bool = False,
-                       ai_title: str = "", ai_intro: str = "", image_url: str = ""):
+                       pending: bool = False, ai_title: str = "", ai_intro: str = "",
+                       image_url: str = "", reason: str = ""):
         """标记新闻为已处理"""
         try:
             self._conn.execute(
                 """INSERT OR IGNORE INTO processed_news 
-                   (entry_id, title, link, source, score, kept, ai_title, ai_intro, image_url) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (entry_id, title, link, source, score, int(kept), ai_title, ai_intro, image_url)
+                   (entry_id, title, link, source, score, kept, pending, ai_title, ai_intro, image_url, reason) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (entry_id, title, link, source, score, int(kept), int(pending), ai_title, ai_intro, image_url, reason)
             )
             self._conn.commit()
+            # 清理旧数据：只保留评分最高的 30 条
+            self._cleanup_old_records()
         except sqlite3.Error as e:
             logger.error(f"写入去重记录失败: {e}")
 
+    def _cleanup_old_records(self, max_records: int = 30):
+        """
+        清理旧记录，只保留评分最高的 max_records 条
+        
+        保留规则：按 score DESC 排序，保留前 30 条，删除其余
+        """
+        try:
+            # 查询当前记录数
+            cursor = self._conn.execute("SELECT COUNT(*) FROM processed_news")
+            count = cursor.fetchone()[0]
+            
+            if count > max_records:
+                # 删除评分最低的记录（保留前 max_records 条）
+                self._conn.execute(
+                    """DELETE FROM processed_news WHERE id NOT IN (
+                        SELECT id FROM processed_news 
+                        ORDER BY score DESC, created_at DESC 
+                        LIMIT ?
+                    )""",
+                    (max_records,)
+                )
+                deleted = count - max_records
+                self._conn.commit()
+                logger.info(f"清理旧记录: 删除 {deleted} 条，保留 {max_records} 条")
+        except sqlite3.Error as e:
+            logger.error(f"清理旧记录失败: {e}")
+
+    def _is_similar_title(self, title: str, threshold: float = 0.9) -> bool:
+        """
+        检查标题是否与最近 24 小时内的记录相似
+        
+        Args:
+            title: 待检查的标题
+            threshold: 相似度阈值（默认 0.9 = 90%）
+            
+        Returns:
+            如果存在相似标题返回 True
+        """
+        try:
+            from rapidfuzz import fuzz
+            
+            # 查询最近 24 小时的标题
+            since = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+            cursor = self._conn.execute(
+                "SELECT title FROM processed_news WHERE created_at > ?",
+                (since,)
+            )
+            recent_titles = [row[0] for row in cursor.fetchall() if row[0]]
+            
+            for recent_title in recent_titles:
+                similarity = fuzz.ratio(title.lower(), recent_title.lower()) / 100.0
+                if similarity >= threshold:
+                    logger.info(f"标题相似度 {similarity:.2%}，跳过: {title[:50]}...")
+                    return True
+            
+            return False
+        except ImportError:
+            logger.warning("rapidfuzz 未安装，跳过标题相似度检查")
+            return False
+        except sqlite3.Error as e:
+            logger.error(f"标题相似度检查失败: {e}")
+            return False
+
     def filter_new(self, items: list) -> list:
         """
-        过滤出未处理过的新闻
+        过滤出未处理过的新闻（支持标题模糊去重）
 
         Args:
             items: NewsItem 列表
@@ -89,13 +158,27 @@ class NewsStorage:
             仅包含未处理条目的 NewsItem 列表
         """
         new_items = []
+        skipped_entry = 0
+        skipped_similar = 0
+        
         for item in items:
-            if not self.is_processed(item.entry_id):
-                new_items.append(item)
-            else:
+            # 1. 检查 entry_id 是否已存在
+            if self.is_processed(item.entry_id):
                 logger.debug(f"跳过已处理: {item.title[:50]}")
+                skipped_entry += 1
+                continue
+            
+            # 2. 检查标题相似度（24小时内）
+            if self._is_similar_title(item.title):
+                skipped_similar += 1
+                continue
+            
+            new_items.append(item)
 
-        logger.info(f"去重过滤: {len(items)} 条中 {len(new_items)} 条为新新闻")
+        logger.info(
+            f"去重过滤: {len(items)} 条中 {len(new_items)} 条为新新闻 "
+            f"(跳过 entry_id: {skipped_entry}, 相似标题: {skipped_similar})"
+        )
         return new_items
 
     def get_stats(self) -> dict:
