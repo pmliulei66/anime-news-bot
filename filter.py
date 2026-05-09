@@ -92,7 +92,13 @@ class AIFilter:
     def _call_gemini(self, user_message: str) -> Optional[dict]:
         """调用 Gemini API"""
         try:
-            response = self._client.generate_content(user_message)
+            response = self._client.generate_content(
+                user_message,
+                generation_config={
+                    "temperature": 0.3,
+                    "max_output_tokens": 200,
+                },
+            )
             text = response.text.strip()
             return self._parse_json_response(text)
         except Exception as e:

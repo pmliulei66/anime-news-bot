@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS processed_news (
     source     TEXT,
     score      INTEGER DEFAULT 0,
     kept       INTEGER DEFAULT 0,
+    ai_title   TEXT    DEFAULT '',
+    ai_intro   TEXT    DEFAULT '',
+    image_url  TEXT    DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -61,14 +64,15 @@ class NewsStorage:
             return False
 
     def mark_processed(self, entry_id: str, title: str = "", link: str = "",
-                       source: str = "", score: int = 0, kept: bool = False):
+                       source: str = "", score: int = 0, kept: bool = False,
+                       ai_title: str = "", ai_intro: str = "", image_url: str = ""):
         """标记新闻为已处理"""
         try:
             self._conn.execute(
                 """INSERT OR IGNORE INTO processed_news 
-                   (entry_id, title, link, source, score, kept) 
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (entry_id, title, link, source, score, int(kept))
+                   (entry_id, title, link, source, score, kept, ai_title, ai_intro, image_url) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (entry_id, title, link, source, score, int(kept), ai_title, ai_intro, image_url)
             )
             self._conn.commit()
         except sqlite3.Error as e:
@@ -117,3 +121,43 @@ class NewsStorage:
             self._conn.close()
             self._conn = None
             logger.info("数据库连接已关闭")
+
+    def get_kept_news(self, date_str: Optional[str] = None) -> list[dict]:
+        """
+        获取指定日期的已保留新闻（用于生成每日汇总）
+
+        Args:
+            date_str: 日期字符串，格式 YYYY-MM-DD，默认今天
+
+        Returns:
+            新闻字典列表
+        """
+        if not date_str:
+            from datetime import datetime
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
+        try:
+            cursor = self._conn.execute(
+                """SELECT title, ai_title, ai_intro, score, source, link, image_url
+                   FROM processed_news
+                   WHERE kept = 1 AND DATE(created_at) = ?
+                   ORDER BY score DESC, created_at ASC""",
+                (date_str,)
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                result.append({
+                    "title": row[0],
+                    "ai_title": row[1],
+                    "ai_intro": row[2],
+                    "score": row[3],
+                    "source": row[4],
+                    "link": row[5],
+                    "image_url": row[6],
+                })
+            logger.info(f"查询到 {date_str} 的保留新闻: {len(result)} 条")
+            return result
+        except sqlite3.Error as e:
+            logger.error(f"查询保留新闻失败: {e}")
+            return []

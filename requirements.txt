@@ -3,3 +3,5 @@ requests>=2.31.0
 google-generativeai>=0.8.0
 openai>=1.50.0
 python-dotenv>=1.0.1
+wechatpy>=1.8.18
+markdown2>=2.4.13

@@ -1,6 +1,6 @@
 # 动漫新闻自动抓取机器人
 
-自动从多个 RSS 源抓取动漫新闻，通过 AI 智能筛选评分后推送到飞书。
+自动从多个 RSS 源抓取动漫新闻，通过 AI 智能筛选评分后推送到飞书，支持一键发布到微信公众号草稿箱。
 
 ## 功能
 
@@ -10,6 +10,7 @@
   - **RSSHub 镜像**：Bilibili 动画区、Bangumi 放送（需自建或使用公共镜像）
 - 🧠 AI 筛选：Gemini / OpenAI 智能评分，自动过滤低价值新闻
 - 📨 飞书推送：Markdown 格式，评分 > 7 的高质量新闻自动推送
+- 📝 公众号发布：Markdown 一键上传到公众号草稿箱，自动处理图片和排版
 - 💾 去重机制：SQLite 持久化，同一条新闻不会重复处理
 - ⏰ 定时运行：支持手动运行和定时循环两种模式
 
@@ -21,13 +22,15 @@ pip install -r requirements.txt
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入你的 API Key 和 Webhook URL
+# 编辑 .env，填入你的 API Key、Webhook URL、公众号 AppID 等
 
-# 3. 手动运行一次
-python main.py
+# 3. 运行新闻抓取
+python main.py                  # 手动运行一次
+python main.py --interval 60    # 每 60 分钟定时运行
 
-# 4. 或启动定时循环（默认每 60 分钟）
-python main.py --interval 60
+# 4. 发布到公众号草稿箱
+python publish_to_wechat.py article.md
+python publish_to_wechat.py article.md --title "自定义标题" --author "作者" --cover cover.jpg
 ```
 
 ## 配置说明
@@ -40,6 +43,8 @@ python main.py --interval 60
 | `GEMINI_API_KEY` | Gemini API Key | - |
 | `OPENAI_API_KEY` | OpenAI API Key | - |
 | `FEISHU_WEBHOOK_URL` | 飞书机器人 Webhook 地址 | - |
+| `WECHAT_APPID` | 微信公众号 AppID | - |
+| `WECHAT_APPSECRET` | 微信公众号 AppSecret | - |
 | `SCORE_THRESHOLD` | 推送评分阈值（1-10） | 7 |
 | `INTERVAL_MINUTES` | 定时抓取间隔（分钟） | 60 |
 | `ENABLE_BGM` | 是否启用 BGM.tv 抓取 | true |
@@ -49,13 +54,14 @@ python main.py --interval 60
 
 ```
 anime-news-bot/
-├── main.py              # 主程序入口
-├── config.py            # 配置加载
-├── fetcher.py           # RSS 抓取模块
-├── filter.py            # AI 筛选评分模块
-├── notifier.py          # 飞书推送模块
-├── storage.py           # SQLite 去重模块
-├── .env.example         # 配置模板
-├── requirements.txt     # 依赖列表
+├── main.py                # 新闻抓取主程序入口
+├── publish_to_wechat.py   # 公众号草稿箱发布工具
+├── config.py              # 配置加载
+├── fetcher.py             # RSS 抓取模块
+├── filter.py              # AI 筛选评分模块
+├── notifier.py            # 飞书推送模块
+├── storage.py             # SQLite 去重模块
+├── .env.example           # 配置模板
+├── requirements.txt       # 依赖列表
 └── README.md
 ```

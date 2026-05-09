@@ -114,6 +114,9 @@ def run_once(dry_run: bool = False) -> dict:
                     source=item.source,
                     score=item.score,
                     kept=False,
+                    ai_title=item.ai_title,
+                    ai_intro=item.ai_intro,
+                    image_url=item.image_url,
                 )
             return stats
 
@@ -130,6 +133,9 @@ def run_once(dry_run: bool = False) -> dict:
                 source=item.source,
                 score=item.score,
                 kept=item in kept_items,
+                ai_title=item.ai_title,
+                ai_intro=item.ai_intro,
+                image_url=item.image_url,
             )
 
         # 7. 打印统计

@@ -104,12 +104,14 @@ def _build_feishu_text(items: list[NewsItem]) -> dict:
             "ann": "ANN",
             "crunchyroll": "CR",
             "bgm": "BGM",
+            "mal": "MAL",
         }.get(item.source, item.source.upper())
 
+        display_title = item.ai_title if item.ai_title else item.title
         lines.append(
-            f"**{i}. {item.title}**\n"
+            f"**{i}. {display_title}**\n"
             f"{score_emoji} 评分: {item.score}/10 | 来源: {source_label}\n"
-            f"💬 {item.ai_summary}\n"
+            f"📝 {item.ai_intro}\n"
             f"🔗 [查看原文]({item.link})\n"
         )
 

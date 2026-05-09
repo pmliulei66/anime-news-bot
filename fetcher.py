@@ -160,7 +160,7 @@ def fetch_rss(rss_url: str, source: str, max_entries: int = 30, retries: int = 2
             logger.error(f"RSS 抓取异常 [{source}] (尝试 {attempt + 1}): {e}")
             if attempt < retries:
                 import time
-                time.sleep(1)
+                time.sleep(2 ** attempt)
 
     # 所有重试都失败了
     logger.error(f"RSS 抓取最终失败 [{source}]: {last_error}")

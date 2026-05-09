@@ -44,6 +44,10 @@ class Config:
     # ---------- 飞书 ----------
     FEISHU_WEBHOOK_URL: str = os.getenv("FEISHU_WEBHOOK_URL", "")
 
+    # ---------- 微信公众号 ----------
+    WECHAT_APPID: str = os.getenv("WECHAT_APPID", "")
+    WECHAT_APPSECRET: str = os.getenv("WECHAT_APPSECRET", "")
+
     # ---------- 筛选 ----------
     SCORE_THRESHOLD: int = int(os.getenv("SCORE_THRESHOLD", "7"))
 
