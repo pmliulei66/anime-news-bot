@@ -129,13 +129,29 @@ def fetch_rss(rss_url: str, source: str, max_entries: int = 30, retries: int = 2
                     if img_match:
                         image_url = img_match.group(1)
 
+                # 解析发布时间
+                import time
+                from email.utils import parsedate_to_datetime
+                
+                published = entry.get("published", "")
+                if published:
+                    try:
+                        # 解析 RFC 2822 格式: "Sun, 10 May 2026 20:26:49 -0700"
+                        dt = parsedate_to_datetime(published)
+                        published = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except Exception:
+                        published = ""
+                elif hasattr(entry, "published_parsed") and entry.published_parsed:
+                    # 时间戳转 ISO 格式
+                    published = time.strftime("%Y-%m-%dT%H:%M:%SZ", entry.published_parsed)
+
                 item = NewsItem(
                     title=entry.get("title", "").strip(),
                     link=entry.get("link", ""),
                     summary=summary,
                     entry_id=entry.get("id", entry.get("link", "")),
                     source=source,
-                    published=entry.get("published", ""),
+                    published=published,
                     image_url=image_url,
                 )
                 items.append(item)

@@ -46,11 +46,7 @@ def generate_markdown(news_list: list[dict], date_str: str) -> str:
     news_list = news_list[:15]
     logger.info(f"取前 {len(news_list)} 条新闻生成汇总")
 
-    # 按评分分组
-    top_news = [n for n in news_list if n["score"] >= 9]
-    hot_news = [n for n in news_list if 7 <= n["score"] < 9]
-
-    # 构建文章
+    # 构建文章（不再分组，直接按评分倒序排列）
     lines = []
 
     # 标题
@@ -62,54 +58,47 @@ def generate_markdown(news_list: list[dict], date_str: str) -> str:
     lines.append(f"> 今日共精选 {len(news_list)} 条动漫新闻，快来看看有没有你关注的作品！")
     lines.append("")
 
-    # 🔥 重磅新闻（评分 9+）
-    if top_news:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 🔥 重磅新闻（评分 9+）")
-        lines.append("")
-        for i, news in enumerate(top_news, 1):
-            title = news["ai_title"] or news["title"]
-            intro = news["ai_intro"] or ""
-            source = news["source"].upper()
-            link = news["link"]
-            image_url = news.get("image_url", "")
+    # 直接按评分倒序排列所有新闻（不分组）
+    for i, news in enumerate(news_list, 1):
+        title = news["ai_title"] or news["title"]
+        intro = news["ai_intro"] or ""
+        image_url = news.get("image_url", "")
+        # 获取新闻日期（如果有）
+        news_date = news.get("published", "") or news.get("created_at", "")
+        if news_date:
+            try:
+                # 尝试解析日期
+                if "T" in news_date:
+                    news_date = datetime.fromisoformat(news_date.replace("Z", "+00:00")).strftime("%m月%d日")
+                elif " " in news_date:
+                    news_date = datetime.strptime(news_date[:10], "%Y-%m-%d").strftime("%m月%d日")
+            except:
+                news_date = ""
 
-            lines.append(f"### {i}. {title}")
-            lines.append("")
-            if intro:
+        # 标题（去掉中括号标注，保留作品名）
+        display_title = title.replace("「", "").replace("」", "").replace("【", "").replace("】", "")
+        lines.append(f"### {i}. {display_title}")
+        lines.append("")
+
+        # 正文（如果包含分段结构，保持格式）
+        if intro:
+            # 处理 AI 返回的 分段格式
+            if "【" in intro and "】" in intro:
+                # 保留原有分段结构
+                lines.append(intro)
+            else:
+                # 没有分段，作为导语处理
                 lines.append(f"{intro}")
-                lines.append("")
-            if image_url:
-                lines.append(f"![{title}]({image_url})")
-                lines.append("")
-            lines.append(f"*📌 来源：{source} | 评分：{news['score']}/10*")
-            lines.append(f"*🔗 [查看原文]({link})*")
             lines.append("")
 
-    # ⭐ 热门资讯（评分 7-8）
-    if hot_news:
-        lines.append("---")
-        lines.append("")
-        lines.append("## ⭐ 热门资讯（评分 7-8）")
-        lines.append("")
-        for i, news in enumerate(hot_news, 1):
-            title = news["ai_title"] or news["title"]
-            intro = news["ai_intro"] or ""
-            source = news["source"].upper()
-            link = news["link"]
-            image_url = news.get("image_url", "")
-
-            lines.append(f"### {i}. {title}")
+        # 图片（放在正文之后）
+        if image_url:
+            lines.append(f"![{title}]({image_url})")
             lines.append("")
-            if intro:
-                lines.append(f"{intro}")
-                lines.append("")
-            if image_url:
-                lines.append(f"![{title}]({image_url})")
-                lines.append("")
-            lines.append(f"*📌 来源：{source} | 评分：{news['score']}/10*")
-            lines.append(f"*🔗 [查看原文]({link})*")
+
+        # 只显示日期
+        if news_date:
+            lines.append(f"*📅 {news_date}*")
             lines.append("")
 
     # 底部

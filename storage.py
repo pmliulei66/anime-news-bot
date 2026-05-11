@@ -23,10 +23,12 @@ CREATE TABLE IF NOT EXISTS processed_news (
     score      INTEGER DEFAULT 0,
     kept       INTEGER DEFAULT 0,
     pending    INTEGER DEFAULT 0,  -- Score == 7 时为待定状态
+    pushed     INTEGER DEFAULT 0,  -- 是否已推送到飞书（0/1）
     ai_title   TEXT    DEFAULT '',
     ai_intro   TEXT    DEFAULT '',
     image_url  TEXT    DEFAULT '',
     reason     TEXT    DEFAULT '',  -- AI 评分理由
+    published  TEXT    DEFAULT '',  -- 新闻发布日期
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -48,6 +50,11 @@ class NewsStorage:
             self._conn = sqlite3.connect(self.db_path)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_CREATE_TABLE_SQL)
+            # 兼容旧数据库：如果 pushed 列不存在则添加
+            try:
+                self._conn.execute("ALTER TABLE processed_news ADD COLUMN pushed INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             self._conn.commit()
             logger.info(f"数据库初始化完成: {self.db_path}")
         except sqlite3.Error as e:
@@ -69,14 +76,14 @@ class NewsStorage:
     def mark_processed(self, entry_id: str, title: str = "", link: str = "",
                        source: str = "", score: int = 0, kept: bool = False,
                        pending: bool = False, ai_title: str = "", ai_intro: str = "",
-                       image_url: str = "", reason: str = ""):
+                       image_url: str = "", reason: str = "", published: str = ""):
         """标记新闻为已处理"""
         try:
             self._conn.execute(
                 """INSERT OR IGNORE INTO processed_news 
-                   (entry_id, title, link, source, score, kept, pending, ai_title, ai_intro, image_url, reason) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (entry_id, title, link, source, score, int(kept), int(pending), ai_title, ai_intro, image_url, reason)
+                   (entry_id, title, link, source, score, kept, pending, ai_title, ai_intro, image_url, reason, published) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (entry_id, title, link, source, score, int(kept), int(pending), ai_title, ai_intro, image_url, reason, published)
             )
             self._conn.commit()
             # 清理旧数据：只保留评分最高的 30 条
@@ -86,28 +93,30 @@ class NewsStorage:
 
     def _cleanup_old_records(self, max_records: int = 30):
         """
-        清理旧记录，只保留评分最高的 max_records 条
-        
-        保留规则：按 score DESC 排序，保留前 30 条，删除其余
+        清理旧记录：每天新增的源数据只保留评分最高的 max_records 条
         """
         try:
-            # 查询当前记录数
-            cursor = self._conn.execute("SELECT COUNT(*) FROM processed_news")
+            # 获取今天（北京时间）的所有记录数
+            cursor = self._conn.execute(
+                """SELECT COUNT(*) FROM processed_news 
+                   WHERE DATE(created_at, '+8 hours') = DATE('now', '+8 hours')"""
+            )
             count = cursor.fetchone()[0]
             
             if count > max_records:
-                # 删除评分最低的记录（保留前 max_records 条）
+                # 只删除今天的记录中评分最低的（保留前 max_records 条）
                 self._conn.execute(
-                    """DELETE FROM processed_news WHERE id NOT IN (
+                    """DELETE FROM processed_news WHERE id IN (
                         SELECT id FROM processed_news 
-                        ORDER BY score DESC, created_at DESC 
+                        WHERE DATE(created_at, '+8 hours') = DATE('now', '+8 hours')
+                        ORDER BY score ASC
                         LIMIT ?
                     )""",
-                    (max_records,)
+                    (count - max_records,)
                 )
                 deleted = count - max_records
                 self._conn.commit()
-                logger.info(f"清理旧记录: 删除 {deleted} 条，保留 {max_records} 条")
+                logger.info(f"清理今日记录: 删除 {deleted} 条，保留 {max_records} 条")
         except sqlite3.Error as e:
             logger.error(f"清理旧记录失败: {e}")
 
@@ -198,6 +207,51 @@ class NewsStorage:
             logger.error(f"获取统计信息失败: {e}")
             return {"total_processed": 0, "total_kept": 0}
 
+    def mark_pushed(self, entry_ids: list[str]):
+        """标记新闻为已推送到飞书"""
+        try:
+            self._conn.executemany(
+                "UPDATE processed_news SET pushed = 1 WHERE entry_id = ?",
+                [(eid,) for eid in entry_ids]
+            )
+            self._conn.commit()
+            logger.info(f"标记 {len(entry_ids)} 条为已推送")
+        except sqlite3.Error as e:
+            logger.error(f"标记推送状态失败: {e}")
+
+    def _is_pushed(self, entry_id: str) -> bool:
+        """检查新闻是否已推送到飞书"""
+        try:
+            cursor = self._conn.execute(
+                "SELECT pushed FROM processed_news WHERE entry_id = ?", (entry_id,)
+            )
+            row = cursor.fetchone()
+            return bool(row and row[0])
+        except sqlite3.Error:
+            return False
+
+    def get_unpushed_kept(self) -> list[dict]:
+        """获取所有 kept=1 但未推送的新闻（按评分排序）"""
+        try:
+            cursor = self._conn.execute(
+                """SELECT title, ai_title, ai_intro, score, source, link, image_url, published, created_at
+                   FROM processed_news
+                   WHERE kept = 1 AND pushed = 0
+                   ORDER BY score DESC, created_at ASC"""
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                result.append({
+                    "title": row[0], "ai_title": row[1], "ai_intro": row[2],
+                    "score": row[3], "source": row[4], "link": row[5],
+                    "image_url": row[6], "published": row[7], "created_at": row[8],
+                })
+            return result
+        except sqlite3.Error as e:
+            logger.error(f"获取未推送新闻失败: {e}")
+            return []
+
     def close(self):
         """关闭数据库连接"""
         if self._conn:
@@ -210,20 +264,32 @@ class NewsStorage:
         获取指定日期的已保留新闻（用于生成每日汇总）
 
         Args:
-            date_str: 日期字符串，格式 YYYY-MM-DD，默认今天
+            date_str: 日期字符串，格式 YYYY-MM-DD，默认今天（北京时间）
 
         Returns:
             新闻字典列表
         """
+        from datetime import datetime, timedelta, timezone, tzinfo
+
+        # 使用北京时间（UTC+8）
+        class CST(tzinfo):
+            def utcoffset(self, _):
+                return timedelta(hours=8)
+            def tzname(self, _):
+                return "CST"
+            def dst(self, _):
+                return timedelta(0)
+
         if not date_str:
-            from datetime import datetime
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            # 默认获取最近24小时内的新闻
+            now_cst = datetime.now(CST())
+            date_str = now_cst.strftime("%Y-%m-%d")
 
         try:
             cursor = self._conn.execute(
-                """SELECT title, ai_title, ai_intro, score, source, link, image_url
+                """SELECT title, ai_title, ai_intro, score, source, link, image_url, published, created_at
                    FROM processed_news
-                   WHERE kept = 1 AND DATE(created_at) = ?
+                   WHERE kept = 1 AND DATE(published, '+8 hours') = ?
                    ORDER BY score DESC, created_at ASC""",
                 (date_str,)
             )
@@ -238,6 +304,8 @@ class NewsStorage:
                     "source": row[4],
                     "link": row[5],
                     "image_url": row[6],
+                    "published": row[7],
+                    "created_at": row[8],
                 })
             logger.info(f"查询到 {date_str} 的保留新闻: {len(result)} 条")
             return result

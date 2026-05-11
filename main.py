@@ -135,7 +135,13 @@ def run_once(dry_run: bool = False) -> dict:
                 ai_intro=item.ai_intro,
                 image_url=item.image_url,
                 reason=item.reason,
+                published=item.published,
             )
+
+        # 6.1 标记已推送到飞书的新闻
+        pushed_ids = [i.entry_id for i in kept_items] + [i.entry_id for i in pending_items]
+        if pushed_ids:
+            storage.mark_pushed(pushed_ids)
 
         # 7. 打印统计
         db_stats = storage.get_stats()

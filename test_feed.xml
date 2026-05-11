@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Anime News Feed</title>
+    <link>http://localhost:8000</link>
+    <description>Test feed for anime news bot</description>
+    
+    <!-- 今天的新闻（5-11） -->
+    <item>
+      <title>「进击的巨人」最终季Part4定档2026年秋季，MAPPA制作决定</title>
+      <link>http://example.com/news/1</link>
+      <pubDate>Mon, 11 May 2026 08:00:00 +0000</pubDate>
+      <description>人气动画「进击的巨人」最终季第四部分正式定档，官方公开了首支PV和制作阵容。</description>
+      <guid>http://example.com/news/1</guid>
+    </item>
+    
+    <item>
+      <title>「孤独摇滚」第二季追加CAST，后藤一里确定为青山吉能配音</title>
+      <link>http://example.com/news/2</link>
+      <pubDate>Mon, 11 May 2026 06:30:00 +0000</pubDate>
+      <description>CloverWorks制作的「孤独摇滚」第二季公开了主要声优阵容。</description>
+      <guid>http://example.com/news/2</guid>
+    </item>
+    
+    <!-- 昨天的新闻（5-10） -->
+    <item>
+      <title>「咒术回战」剧场版最新PV公开，五条悟回归</title>
+      <link>http://example.com/news/3</link>
+      <pubDate>Sun, 10 May 2026 14:00:00 +0000</pubDate>
+      <description>「咒术回战」剧场版「怀玉·玉折」篇公开了最新PV，五条悟角色确认登场。</description>
+      <guid>http://example.com/news/3</guid>
+    </item>
+    
+    <!-- 前天的新闻（5-09） -->
+    <item>
+      <title>京都动画新作「海が走るエンドロール」定档2027年</title>
+      <link>http://example.com/news/4</link>
+      <pubDate>Sat, 09 May 2026 10:00:00 +0000</pubDate>
+      <description>京都动画宣布改编漫画「海が走るエンドロール」为剧场版动画。</description>
+      <guid>http://example.com/news/4</guid>
+    </item>
+    
+    <!-- 大前天的新闻（5-08） -->
+    <item>
+      <title>「魔法少女小圆」剧场版瓦尔普吉斯的回天追加CAST</title>
+      <link>http://example.com/news/5</link>
+      <pubDate>Fri, 08 May 2026 16:00:00 +0000</pubDate>
+      <description>「魔法少女小圆」系列第四部剧场版公开了追加声优阵容。</description>
+      <guid>http://example.com/news/5</guid>
+    </item>
+    
+    <!-- 低质量新闻（应该被过滤） -->
+    <item>
+      <title>「某手游」联动活动开启，限定周边发售</title>
+      <link>http://example.com/news/6</link>
+      <pubDate>Mon, 11 May 2026 09:00:00 +0000</pubDate>
+      <description>人气手游开启联动活动，限定周边同步发售。</description>
+      <guid>http://example.com/news/6</guid>
+    </item>
+    
+  </channel>
+</rss>
